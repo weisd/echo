@@ -4,17 +4,17 @@ import (
 	"bytes"
 	"compress/gzip"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/labstack/echo"
-	"github.com/labstack/echo/test"
 	"github.com/stretchr/testify/assert"
 )
 
 func TestGzip(t *testing.T) {
 	e := echo.New()
-	req := test.NewRequest(echo.GET, "/", nil)
-	rec := test.NewResponseRecorder()
+	req, _ := http.NewRequest(echo.GET, "/", nil)
+	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
 
 	// Skip if no Accept-Encoding header
@@ -25,14 +25,13 @@ func TestGzip(t *testing.T) {
 	h(c)
 	assert.Equal(t, "test", rec.Body.String())
 
-	req = test.NewRequest(echo.GET, "/", nil)
-	req.Header().Set(echo.HeaderAcceptEncoding, "gzip")
-	rec = test.NewResponseRecorder()
-	c = e.NewContext(req, rec)
-
 	// Gzip
+	req, _ = http.NewRequest(echo.GET, "/", nil)
+	req.Header.Set(echo.HeaderAcceptEncoding, gzipScheme)
+	rec = httptest.NewRecorder()
+	c = e.NewContext(req, rec)
 	h(c)
-	assert.Equal(t, "gzip", rec.Header().Get(echo.HeaderContentEncoding))
+	assert.Equal(t, gzipScheme, rec.Header().Get(echo.HeaderContentEncoding))
 	assert.Contains(t, rec.Header().Get(echo.HeaderContentType), echo.MIMETextPlain)
 	r, err := gzip.NewReader(rec.Body)
 	defer r.Close()
@@ -45,11 +44,12 @@ func TestGzip(t *testing.T) {
 
 func TestGzipNoContent(t *testing.T) {
 	e := echo.New()
-	req := test.NewRequest(echo.GET, "/", nil)
-	rec := test.NewResponseRecorder()
+	req, _ := http.NewRequest(echo.GET, "/", nil)
+	req.Header.Set(echo.HeaderAcceptEncoding, gzipScheme)
+	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
 	h := Gzip()(func(c echo.Context) error {
-		return c.NoContent(http.StatusOK)
+		return c.NoContent(http.StatusNoContent)
 	})
 	if assert.NoError(t, h(c)) {
 		assert.Empty(t, rec.Header().Get(echo.HeaderContentEncoding))
@@ -62,11 +62,12 @@ func TestGzipErrorReturned(t *testing.T) {
 	e := echo.New()
 	e.Use(Gzip())
 	e.GET("/", func(c echo.Context) error {
-		return echo.NewHTTPError(http.StatusInternalServerError, "error")
+		return echo.ErrNotFound
 	})
-	req := test.NewRequest(echo.GET, "/", nil)
-	rec := test.NewResponseRecorder()
-	e.ServeHTTP(req, rec)
+	req, _ := http.NewRequest(echo.GET, "/", nil)
+	req.Header.Set(echo.HeaderAcceptEncoding, gzipScheme)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	assert.Equal(t, http.StatusNotFound, rec.Code)
 	assert.Empty(t, rec.Header().Get(echo.HeaderContentEncoding))
-	assert.Equal(t, "error", rec.Body.String())
 }
